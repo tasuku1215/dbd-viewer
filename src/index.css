@@ -543,48 +543,58 @@ input, select { font: inherit; color: inherit; }
 
 /* ─── Mobile ────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  html, body, #root { overflow: auto; }
-  .viewer { height: auto; min-height: 100dvh; overflow: auto; }
+  /* スクロールなし。全要素を画面内に収める */
+  html, body, #root { overflow: hidden; height: 100%; }
+  .viewer {
+    height: 100svh; /* small viewport height: ブラウザUIを除いた安全な高さ */
+    height: 100dvh; /* dynamic viewport height: 対応ブラウザ向け上書き */
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
 
-  /* Panels */
-  .panels-container { display: flex !important; flex-direction: column; }
-  .killer-wrap { flex-shrink: 0; aspect-ratio: 16/9; position: relative; }
+  /* Panels: flex列。killer固定、survivorが残りを埋める */
+  .panels-container {
+    display: flex !important;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .killer-wrap {
+    flex: 0 0 56.25vw; /* 16:9 固定高さ */
+    position: relative;
+    overflow: hidden;
+  }
   .killer-wrap .video-panel { position: absolute; inset: 0; }
   .survivor-row {
     display: grid !important;
     grid-template-columns: repeat(2, 1fr);
-    aspect-ratio: 8/9;
-    flex-shrink: 0;
+    grid-template-rows: repeat(2, 1fr); /* 明示的に2行 */
+    flex: 1;
+    min-height: 0;
   }
   .resize-handle { display: none; }
 
   /* Controls bar */
   .controls-bar { padding: 3px 6px 2px; }
 
-  /* Controls row: 2-line layout */
-  .controls {
-    gap: 4px;
-    row-gap: 4px;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-  }
+  /* Controls row: 2行レイアウト */
+  .controls { gap: 4px; row-gap: 4px; flex-wrap: wrap; justify-content: flex-start; }
   .ctrl-btn { min-width: 38px; min-height: 32px; padding: 4px 7px; font-size: 0.8rem; }
   .play-btn  { min-width: 44px; }
-  /* Share button: always on its own row at the end */
+  /* 共有ボタンは最終行に全幅 */
   .share-btn { margin-left: 0; order: 99; width: 100%; justify-content: center; }
   .speed-select, .quality-select, .layout-select {
-    min-height: 32px;
-    padding: 3px 4px;
-    font-size: 0.78rem;
+    min-height: 32px; padding: 3px 4px; font-size: 0.78rem;
   }
 
   /* Seek bar */
   .seek-time { min-width: 36px; font-size: 0.72rem; }
 
   /* Volume row */
-  .volume-row { gap: 6px; padding: 3px 6px; }
+  .volume-row { gap: 6px; padding: 3px 6px; overflow-x: auto; }
   .volume-slider { width: 48px; }
-  .solo-btn { display: none; }           /* ソロボタンは非表示（スペース節約） */
+  .solo-btn { display: none; } /* スペース節約 */
   .volume-label { font-size: 0.7rem; }
   .mute-all-btn { padding: 3px 8px; font-size: 0.72rem; }
 
