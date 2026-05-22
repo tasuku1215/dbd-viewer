@@ -90,7 +90,8 @@ export default function Controls({
       </select>
 
       {/* Share */}
-      <button className="ctrl-btn share-btn" onClick={onShare} title="共有リンクを生成">
+      <button className="ctrl-btn share-btn" onClick={onShare} title="共有リンクを生成"
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
         🔗 共有
       </button>
     </div>

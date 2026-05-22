@@ -168,9 +168,18 @@ export default function ViewerScreen() {
   }
 
   function handleSkip(delta: number) {
+    const { isPlaying: playing, playbackRate } = useStore.getState()
     const logical = getLogicalTime()
+    // Pause sync loop + players during seek to prevent loop interference
+    seekingRef.current = true
+    if (playing) playersRef.current.forEach((p) => p?.pauseVideo())
     seekAll(logical + delta)
-    if (useStore.getState().isPlaying) setTimeout(() => playersRef.current.forEach((p) => p?.playVideo()), 200)
+    setTimeout(() => {
+      seekingRef.current = false
+      if (playing) {
+        playersRef.current.forEach((p) => { p?.setPlaybackRate(playbackRate); p?.playVideo() })
+      }
+    }, 300)
   }
 
   // ── keyboard shortcuts ─────────────────────────────────────────
