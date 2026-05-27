@@ -11,6 +11,9 @@ export interface PanelConfig {
 
 export type Layout = 'default' | 'focus' | 'equal'
 
+// L1: Strict union type for YouTube quality values
+export type VideoQuality = 'default' | 'small' | 'medium' | 'large' | 'hd720' | 'hd1080' | 'highres'
+
 export interface Memo {
   id: string
   time: number
@@ -36,14 +39,15 @@ declare global {
       seekTo(seconds: number, allowSeekAhead: boolean): void
       getCurrentTime(): number
       getDuration(): number
+      getPlayerState(): number
       setVolume(volume: number): void
       mute(): void
       unMute(): void
       isMuted(): boolean
       setPlaybackRate(rate: number): void
+      /** @deprecated silently ignored since ~2018; kept for API completeness */
       setPlaybackQuality(quality: string): void
       getAvailableQualityLevels(): string[]
-      getPlayerState(): number
       destroy(): void
     }
     interface PlayerOptions {
@@ -66,12 +70,12 @@ declare global {
       onError?: (event: { data: number }) => void
     }
     const PlayerState: {
-      UNSTARTED: -1
-      ENDED: 0
-      PLAYING: 1
-      PAUSED: 2
-      BUFFERING: 3
-      CUED: 5
+      readonly UNSTARTED: -1
+      readonly ENDED: 0
+      readonly PLAYING: 1
+      readonly PAUSED: 2
+      readonly BUFFERING: 3
+      readonly CUED: 5
     }
   }
 }

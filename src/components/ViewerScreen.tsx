@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useStore } from '../store'
 import VideoPanel from './VideoPanel'
 import Controls from './Controls'
@@ -16,24 +16,19 @@ export default function ViewerScreen() {
     focusedPanel,
     expandedPanel,
     showShareModal,
-    initialTime,
-    setCurrentTime,
-    setDuration,
-    setFocusedPanel,
-    setExpandedPanel,
+    volumes,
     setLayout,
-    updatePanel,
-    addMemo,
   } = useStore()
 
   const playersRef = useRef<(YT.Player | null)[]>(new Array(5).fill(null))
   const syncTimerRef = useRef<number | null>(null)
-  const seekingRef = useRef(false)
+  const seekingRef  = useRef(false)
+  const skipTimerRef = useRef<number | null>(null)   // H5: prevents rapid-skip timer collision
 
-  // ── resizable split ────────────────────────────────────────────────────────
+  // ── resizable split ─────────────────────────────────────────────────────────
   const [splitPct, setSplitPct] = useState(60)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const resizingRef = useRef(false)
+  const containerRef  = useRef<HTMLDivElement>(null)
+  const resizingRef   = useRef(false)
 
   function handleResizeDown(e: React.PointerEvent) {
     resizingRef.current = true
@@ -43,52 +38,52 @@ export default function ViewerScreen() {
   function handleResizeMove(e: React.PointerEvent) {
     if (!resizingRef.current || !containerRef.current) return
     const rect = containerRef.current.getBoundingClientRect()
-    const pct = ((e.clientY - rect.top) / rect.height) * 100
+    const pct  = ((e.clientY - rect.top) / rect.height) * 100
     setSplitPct(Math.min(85, Math.max(15, pct)))
   }
   function handleResizeUp() { resizingRef.current = false }
 
-  // ── time helpers ───────────────────────────────────────────────────────────
-  // "logical time" = killer's raw playback time − killer's offset
-  // All players: raw time = logicalTime + panel.offset
+  // ── time helpers (C3: all read live state via getState() — no stale closures) ──
   const getMaster = () => playersRef.current[0]
 
+  /** logical time = killer raw − killer offset */
   const getLogicalTime = useCallback((): number => {
     const master = getMaster()
-    if (master) return master.getCurrentTime() - panels[0].offset
+    if (master) return master.getCurrentTime() - useStore.getState().panels[0].offset
     return useStore.getState().currentTime
-  }, [panels])
+  }, []) // stable: no closed-over state
 
-  /** Seek all players to logicalTime (= common timeline position) */
+  /** Seek all players to the given logical time */
   const seekAll = useCallback((logicalTime: number) => {
-    panels.forEach((p, i) => {
-      playersRef.current[i]?.seekTo(logicalTime + p.offset, true)
+    const { panels: p, setCurrentTime } = useStore.getState()
+    p.forEach((panel, i) => {
+      playersRef.current[i]?.seekTo(logicalTime + panel.offset, true)
     })
     setCurrentTime(logicalTime)
-  }, [panels, setCurrentTime])
+  }, []) // stable
 
-  /** Sync loop: keep survivors aligned to killer, updating currentTime */
+  /** Sync loop — C3: stable; reads fresh state each tick via getState() */
   const syncPlayers = useCallback(() => {
+    const state  = useStore.getState()
     const master = getMaster()
     if (!master) return
-    const logicalTime = master.getCurrentTime() - panels[0].offset
-    setCurrentTime(logicalTime)
+    const logicalTime = master.getCurrentTime() - state.panels[0].offset
+    state.setCurrentTime(logicalTime)
     const dur = master.getDuration()
-    if (dur > 0) setDuration(dur)
+    if (dur > 0) state.setDuration(dur)
 
-    panels.forEach((p, i) => {
+    state.panels.forEach((p, i) => {
       if (i === 0) return
       const player = playersRef.current[i]
       if (!player) return
       const expected = logicalTime + p.offset
-      const actual = player.getCurrentTime()
-      if (Math.abs(actual - expected) > SYNC_THRESHOLD_S) {
+      if (Math.abs(player.getCurrentTime() - expected) > SYNC_THRESHOLD_S) {
         player.seekTo(expected, true)
       }
     })
-  }, [panels, setCurrentTime, setDuration])
+  }, []) // stable — no deps on React state
 
-  // ── sync loop ──────────────────────────────────────────────────────────────
+  // ── sync loop ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isPlaying) {
       if (syncTimerRef.current) { clearInterval(syncTimerRef.current); syncTimerRef.current = null }
@@ -98,91 +93,110 @@ export default function ViewerScreen() {
       if (!seekingRef.current) syncPlayers()
     }, SYNC_INTERVAL_MS)
     return () => { if (syncTimerRef.current) clearInterval(syncTimerRef.current) }
-  }, [isPlaying, syncPlayers])
+  }, [isPlaying, syncPlayers]) // syncPlayers is now stable → interval never restarts spuriously
 
-  // ── player callbacks ───────────────────────────────────────────────────────
+  // ── player callbacks ──────────────────────────────────────────────────────────
   const handlePlayerReady = useCallback((index: number, player: YT.Player) => {
     playersRef.current[index] = player
 
-    if (index === 0 && initialTime > 0) {
-      player.seekTo(initialTime + panels[0].offset, true)
-      setCurrentTime(initialTime)
+    const state = useStore.getState()
+
+    if (index === 0 && state.initialTime > 0) {
+      player.seekTo(state.initialTime + state.panels[0].offset, true)
+      state.setCurrentTime(state.initialTime)
       const dur = player.getDuration()
-      if (dur > 0) setDuration(dur)
+      if (dur > 0) state.setDuration(dur)
     } else {
       const master = getMaster()
       if (master) {
-        const logicalTime = master.getCurrentTime() - panels[0].offset
-        player.seekTo(logicalTime + panels[index].offset, true)
+        const logicalTime = master.getCurrentTime() - state.panels[0].offset
+        player.seekTo(logicalTime + state.panels[index].offset, true)
       }
     }
 
-    // Apply quality and start if already playing
-    const { isPlaying: playing, playbackRate, quality } = useStore.getState()
-    player.setPlaybackQuality(quality)
-    if (playing) {
-      player.setPlaybackRate(playbackRate)
+    // Apply initial volume from store
+    const vol = state.volumes[index]
+    if (vol === 0) { player.mute() }
+    else           { player.unMute(); player.setVolume(vol) }
+
+    if (state.isPlaying) {
+      player.setPlaybackRate(state.playbackRate)
       player.playVideo()
     }
-  }, [initialTime, panels, setCurrentTime, setDuration])
+  }, []) // stable
 
   const handlePlayerDestroy = useCallback((index: number) => {
     playersRef.current[index] = null
   }, [])
 
-  // ── offset change ──────────────────────────────────────────────────────────
-  function handleOffsetChange(index: number, delta: number) {
-    const newOffset = panels[index].offset + delta
-    updatePanel(index, { offset: newOffset })
-    const player = playersRef.current[index]
-    if (!player) return
-    const killerOffset = index === 0 ? newOffset : panels[0].offset
-    const logicalTime = (getMaster()?.getCurrentTime() ?? useStore.getState().currentTime) - killerOffset
-    player.seekTo(logicalTime + newOffset, true)
-  }
+  // ── offset change (H3: reads fresh state, handles killer-changes correctly) ──
+  const handleOffsetChange = useCallback((index: number, delta: number) => {
+    const state     = useStore.getState()
+    const newOffset = state.panels[index].offset + delta
+    state.updatePanel(index, { offset: newOffset })
 
-  // ── playback controls ──────────────────────────────────────────────────────
+    const killerRaw = playersRef.current[0]?.getCurrentTime() ?? state.currentTime
+
+    if (index === 0) {
+      // Killer offset changed → logical time shifts → re-sync all survivors
+      const newLogicalTime = killerRaw - newOffset
+      state.setCurrentTime(newLogicalTime)
+      state.panels.forEach((p, i) => {
+        if (i === 0) return
+        playersRef.current[i]?.seekTo(newLogicalTime + p.offset, true)
+      })
+    } else {
+      // Survivor offset changed → re-seek just this survivor
+      const logicalTime = killerRaw - state.panels[0].offset
+      playersRef.current[index]?.seekTo(logicalTime + newOffset, true)
+    }
+  }, []) // stable
+
+  // ── playback controls ─────────────────────────────────────────────────────────
   function togglePlay() {
-    const { isPlaying: cur, playbackRate } = useStore.getState()
+    const { isPlaying: cur, playbackRate, setIsPlaying } = useStore.getState()
     const next = !cur
-    useStore.getState().setIsPlaying(next)
+    setIsPlaying(next)
     playersRef.current.forEach((p) => {
       if (!p) return
       if (next) { p.setPlaybackRate(playbackRate); p.playVideo() }
-      else p.pauseVideo()
+      else        p.pauseVideo()
     })
   }
 
   function handleSeekStart() {
     seekingRef.current = true
-    if (isPlaying) playersRef.current.forEach((p) => p?.pauseVideo())
+    if (useStore.getState().isPlaying) playersRef.current.forEach((p) => p?.pauseVideo())
   }
 
   function handleSeekEnd(logicalTime: number) {
     seekAll(logicalTime)
     seekingRef.current = false
-    if (isPlaying) setTimeout(() => {
+    if (useStore.getState().isPlaying) setTimeout(() => {
       const { playbackRate } = useStore.getState()
       playersRef.current.forEach((p) => { p?.setPlaybackRate(playbackRate); p?.playVideo() })
     }, 300)
   }
 
+  // H5: clear previous skip timer before setting a new one (rapid-skip safety)
   function handleSkip(delta: number) {
     const { isPlaying: playing, playbackRate } = useStore.getState()
     const logical = getLogicalTime()
-    // Pause sync loop + players during seek to prevent loop interference
     seekingRef.current = true
     if (playing) playersRef.current.forEach((p) => p?.pauseVideo())
     seekAll(logical + delta)
-    setTimeout(() => {
-      seekingRef.current = false
+
+    if (skipTimerRef.current) clearTimeout(skipTimerRef.current)
+    skipTimerRef.current = window.setTimeout(() => {
+      skipTimerRef.current = null
+      seekingRef.current   = false
       if (playing) {
         playersRef.current.forEach((p) => { p?.setPlaybackRate(playbackRate); p?.playVideo() })
       }
     }, 300)
   }
 
-  // ── keyboard shortcuts ─────────────────────────────────────────
+  // ── keyboard shortcuts (H1: all handlers use getState() — no stale closures) ──
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName
@@ -192,10 +206,10 @@ export default function ViewerScreen() {
         case 'ArrowLeft':  e.preventDefault(); handleSkip(e.shiftKey ? -30 : -10); break
         case 'ArrowRight': e.preventDefault(); handleSkip(e.shiftKey ? 30 : 10); break
         case 'm': case 'M':
-          addMemo(useStore.getState().currentTime); break
+          useStore.getState().addMemo(useStore.getState().currentTime); break
         case 'Escape':
           if (useStore.getState().expandedPanel !== null) useStore.getState().setExpandedPanel(null)
-          else if (useStore.getState().showShareModal) useStore.getState().setShowShareModal(false)
+          else if (useStore.getState().showShareModal)    useStore.getState().setShowShareModal(false)
           break
         default:
           if (e.key >= '1' && e.key <= '5') {
@@ -215,27 +229,45 @@ export default function ViewerScreen() {
   }
 
   function handleQualityChange(quality: string) {
-    useStore.getState().setQuality(quality)
-    playersRef.current.forEach((p) => p?.setPlaybackQuality(quality))
+    useStore.getState().setQuality(quality as import('../types').VideoQuality)
   }
 
+  // M4: update store so slider stays in sync after re-renders
   function handleVolumeChange(index: number, volume: number) {
+    useStore.getState().setVolume(index, volume)
     const player = playersRef.current[index]
     if (!player) return
     volume === 0 ? player.mute() : (player.unMute(), player.setVolume(volume))
   }
 
   function handleSolo(index: number) {
-    playersRef.current.forEach((p, i) => {
+    panels.forEach((_, i) => {
+      const p = playersRef.current[i]
       if (!p) return
-      i === index ? (p.unMute(), p.setVolume(100)) : p.mute()
+      if (i === index) { p.unMute(); p.setVolume(100); useStore.getState().setVolume(i, 100) }
+      else             { p.mute();                      useStore.getState().setVolume(i, 0) }
     })
   }
 
-  function handleMuteAll() { playersRef.current.forEach((p) => p?.mute()) }
+  function handleMuteAll() {
+    playersRef.current.forEach((p, i) => {
+      p?.mute()
+      useStore.getState().setVolume(i, 0)
+    })
+  }
 
-  // ── layout ─────────────────────────────────────────────────────────────────
-  const isEqual = layout === 'equal'
+  // C4: stable panel callbacks — created once; onToggleExpand reads expandedPanel
+  //     via getState() so no re-creation needed when expandedPanel changes
+  const panelCallbacks = useMemo(() => [0, 1, 2, 3, 4].map((i) => ({
+    onClick:        () => useStore.getState().setFocusedPanel(i),
+    onToggleExpand: () => {
+      const cur = useStore.getState().expandedPanel
+      useStore.getState().setExpandedPanel(cur === i ? null : i)
+    },
+  })), []) // stable for the lifetime of this component
+
+  // ── layout ───────────────────────────────────────────────────────────────────
+  const isEqual  = layout === 'equal'
   const gridRows = isEqual ? '1fr 1fr' : `${splitPct}fr 6px ${100 - splitPct}fr`
 
   return (
@@ -256,11 +288,11 @@ export default function ViewerScreen() {
             panel={panels[0]} index={0}
             isFocused={focusedPanel === 0}
             isExpanded={expandedPanel === 0}
-            onClick={() => setFocusedPanel(0)}
+            onClick={panelCallbacks[0].onClick}
             onPlayerReady={handlePlayerReady}
             onPlayerDestroy={handlePlayerDestroy}
             onOffsetChange={handleOffsetChange}
-            onToggleExpand={() => setExpandedPanel(expandedPanel === 0 ? null : 0)}
+            onToggleExpand={panelCallbacks[0].onToggleExpand}
           />
         </div>
 
@@ -277,11 +309,11 @@ export default function ViewerScreen() {
               panel={panels[i]} index={i}
               isFocused={focusedPanel === i}
               isExpanded={expandedPanel === i}
-              onClick={() => setFocusedPanel(i)}
+              onClick={panelCallbacks[i].onClick}
               onPlayerReady={handlePlayerReady}
               onPlayerDestroy={handlePlayerDestroy}
               onOffsetChange={handleOffsetChange}
-              onToggleExpand={() => setExpandedPanel(expandedPanel === i ? null : i)}
+              onToggleExpand={panelCallbacks[i].onToggleExpand}
             />
           ))}
         </div>
@@ -294,7 +326,7 @@ export default function ViewerScreen() {
           onSkip={handleSkip}
           onSpeedChange={handleSpeedChange}
           onQualityChange={handleQualityChange}
-          onAddMemo={() => addMemo(useStore.getState().currentTime)}
+          onAddMemo={() => useStore.getState().addMemo(useStore.getState().currentTime)}
           onVolumeChange={handleVolumeChange}
           onSolo={handleSolo}
           onMuteAll={handleMuteAll}
@@ -303,13 +335,14 @@ export default function ViewerScreen() {
         />
       </div>
 
+      {/* M4: controlled inputs — value from store so sliders stay in sync after re-render */}
       <div className="volume-row">
         {panels.map((p, i) => (
           <div key={p.role} className="volume-item">
             <span className="volume-label">{p.emoji}{p.name || p.label}</span>
             <input
               type="range" min={0} max={100}
-              defaultValue={i === 0 ? 100 : 0}
+              value={volumes[i]}
               className="volume-slider"
               onChange={(e) => handleVolumeChange(i, Number(e.target.value))}
             />

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { PanelConfig, Layout, Memo } from './types'
+import { PanelConfig, Layout, Memo, VideoQuality } from './types'
 
 const DEFAULT_PANELS: PanelConfig[] = [
   { role: 'killer',    emoji: '🔪', label: 'Killer',      name: '', url: '', offset: 0 },
@@ -9,6 +9,9 @@ const DEFAULT_PANELS: PanelConfig[] = [
   { role: 'survivor4', emoji: '🔵', label: 'Survivor 4',  name: '', url: '', offset: 0 },
 ]
 
+// Default: killer audible, survivors muted
+const DEFAULT_VOLUMES = [100, 0, 0, 0, 0]
+
 interface AppStore {
   panels: PanelConfig[]
   isPlaying: boolean
@@ -16,13 +19,14 @@ interface AppStore {
   duration: number
   playbackRate: number
   layout: Layout
-  focusedPanel: number       // 0 = killer, 1-4 = survivors
+  focusedPanel: number
   expandedPanel: number | null
-  quality: string
+  quality: VideoQuality
+  volumes: number[]           // M4: controlled volume state per panel
   memos: Memo[]
   showShareModal: boolean
-  isSetup: boolean           // true = URL input screen
-  initialTime: number        // time to seek to on load (from share URL)
+  isSetup: boolean
+  initialTime: number
 
   setPanels: (panels: PanelConfig[]) => void
   updatePanel: (index: number, patch: Partial<PanelConfig>) => void
@@ -33,7 +37,8 @@ interface AppStore {
   setLayout: (l: Layout) => void
   setFocusedPanel: (i: number) => void
   setExpandedPanel: (i: number | null) => void
-  setQuality: (q: string) => void
+  setQuality: (q: VideoQuality) => void
+  setVolume: (index: number, volume: number) => void
   addMemo: (time: number) => void
   removeMemo: (id: string) => void
   setShowShareModal: (v: boolean) => void
@@ -50,7 +55,8 @@ export const useStore = create<AppStore>((set) => ({
   layout: 'default',
   focusedPanel: 0,
   expandedPanel: null,
-  quality: 'hd720',
+  quality: 'default',        // L1: default = auto (setPlaybackQuality is deprecated anyway)
+  volumes: DEFAULT_VOLUMES,
   memos: [],
   showShareModal: false,
   isSetup: true,
@@ -71,8 +77,15 @@ export const useStore = create<AppStore>((set) => ({
   setFocusedPanel: (focusedPanel) => set({ focusedPanel }),
   setExpandedPanel: (expandedPanel) => set({ expandedPanel }),
   setQuality: (quality) => set({ quality }),
+  setVolume: (index, volume) =>
+    set((s) => {
+      const volumes = [...s.volumes]
+      volumes[index] = volume
+      return { volumes }
+    }),
+  // M6: use crypto.randomUUID() to avoid duplicate IDs on rapid calls
   addMemo: (time) => set((s) => ({
-    memos: [...s.memos, { id: `${Date.now()}`, time: Math.floor(time) }],
+    memos: [...s.memos, { id: crypto.randomUUID(), time: Math.floor(time) }],
   })),
   removeMemo: (id) => set((s) => ({ memos: s.memos.filter((m) => m.id !== id) })),
   setShowShareModal: (showShareModal) => set({ showShareModal }),

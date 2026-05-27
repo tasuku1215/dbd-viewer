@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import { useYouTubeAPI } from '../hooks/useYouTubeAPI'
 import { extractVideoId } from '../utils/youtube'
 import { PanelConfig } from '../types'
@@ -15,7 +15,8 @@ interface Props {
   onToggleExpand: () => void
 }
 
-export default function VideoPanel({
+// C4: wrap with React.memo so the 5 panels don't re-render every 200ms sync tick
+const VideoPanel = memo(function VideoPanel({
   panel, index, isFocused, isExpanded, onClick,
   onPlayerReady, onPlayerDestroy, onOffsetChange, onToggleExpand,
 }: Props) {
@@ -25,13 +26,17 @@ export default function VideoPanel({
   const videoId = extractVideoId(panel.url)
 
   useEffect(() => {
-    if (!apiReady || !videoId) return
-
+    // Destroy any existing player first (handles videoId change or url cleared)
     if (playerRef.current) {
-      playerRef.current.destroy()
+      try { playerRef.current.destroy() } catch {}
       playerRef.current = null
       onPlayerDestroy(index)
     }
+
+    if (!apiReady || !videoId) return
+
+    // H2: use `active` flag to guard against race where cleanup fires before onReady
+    let active = true
 
     const player = new window.YT.Player(divId, {
       videoId,
@@ -46,6 +51,11 @@ export default function VideoPanel({
       },
       events: {
         onReady: (e) => {
+          if (!active) {
+            // Effect cleaned up before onReady fired — destroy the orphaned player
+            try { e.target.destroy() } catch {}
+            return
+          }
           playerRef.current = e.target
           onPlayerReady(index, e.target)
         },
@@ -53,13 +63,14 @@ export default function VideoPanel({
     })
 
     return () => {
-      player.destroy()
+      active = false
+      try { player.destroy() } catch {}
       playerRef.current = null
       onPlayerDestroy(index)
     }
   }, [apiReady, videoId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  function handleOffset(delta: number, e: React.MouseEvent) {
+  function handleOffset(delta: number, e: React.MouseEvent | React.TouchEvent) {
     e.stopPropagation()
     onOffsetChange(index, delta)
   }
@@ -95,7 +106,7 @@ export default function VideoPanel({
         </div>
       )}
 
-      {/* Bottom offset controls */}
+      {/* Bottom offset controls — always visible on touch, hover-only on desktop (see CSS) */}
       <div className="panel-offset-bar" onClick={(e) => e.stopPropagation()}>
         <button className="off-btn" onClick={(e) => handleOffset(-10, e)}>-10s</button>
         <button className="off-btn" onClick={(e) => handleOffset(-1, e)}>-1s</button>
@@ -107,4 +118,6 @@ export default function VideoPanel({
       </div>
     </div>
   )
-}
+})
+
+export default VideoPanel

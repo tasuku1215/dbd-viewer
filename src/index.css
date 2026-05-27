@@ -546,8 +546,9 @@ input, select { font: inherit; color: inherit; }
   /* スクロールなし。全要素を画面内に収める */
   html, body, #root { overflow: hidden; height: 100%; }
   .viewer {
-    height: 100svh; /* small viewport height: ブラウザUIを除いた安全な高さ */
-    height: 100dvh; /* dynamic viewport height: 対応ブラウザ向け上書き */
+    height: 100vh;  /* C1: baseline fallback (すべてのブラウザ) */
+    height: 100svh; /* iOS 15.4+: アドレスバーを除いた安全な高さ */
+    height: 100dvh; /* モダンブラウザ: アドレスバーの表示/非表示に追随 */
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -575,6 +576,9 @@ input, select { font: inherit; color: inherit; }
   }
   .resize-handle { display: none; }
 
+  /* M3: back button tap target ≥ 44px */
+  .back-btn { padding: 8px 14px; font-size: 0.8rem; }
+
   /* Controls bar */
   .controls-bar { padding: 3px 6px 2px; }
 
@@ -598,9 +602,67 @@ input, select { font: inherit; color: inherit; }
   .volume-label { font-size: 0.7rem; }
   .mute-all-btn { padding: 3px 8px; font-size: 0.72rem; }
 
+  /* M2: seekbar thumb — larger touch area */
+  .seekbar-track { height: 32px; }
+  .seekbar-thumb { width: 20px; height: 20px; }
+
   /* Memo chips */
   .memo-list { gap: 3px; }
   .memo-chip { font-size: 0.68rem; }
+  /* M6: memo remove button tap area */
+  .memo-chip-remove { padding: 4px 6px; font-size: 1rem; }
+}
+
+/* ─── C2: Touch devices — show offset bar & expand btn always ───── */
+@media (hover: none) {
+  .panel-offset-bar {
+    opacity: 1;
+    pointer-events: auto;
+    /* Smaller font on touch to avoid overflow */
+    font-size: 0.7rem;
+    padding: 2px 4px;
+    gap: 2px;
+  }
+  .off-btn { padding: 4px 5px; min-height: 36px; }
+  .expand-btn { opacity: 1; }
+}
+
+/* ─── M1: Landscape on narrow phones ──────────────────────────── */
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 500px) {
+  html, body, #root { overflow: hidden; height: 100%; }
+  .viewer {
+    height: 100vh;
+    height: 100svh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  /* Side-by-side: killer left, survivors right */
+  .panels-container {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    grid-template-rows: 1fr !important;
+    flex: 1;
+    min-height: 0;
+  }
+  .killer-wrap {
+    flex: none !important;
+    height: auto !important;
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .survivor-row {
+    grid-template-columns: repeat(2, 1fr) !important;
+    grid-template-rows: repeat(2, 1fr) !important;
+    height: auto !important;
+    grid-row: 1;
+    grid-column: 2;
+    flex: none;
+  }
+  .resize-handle { display: none !important; }
+  /* Compact controls for landscape */
+  .controls-bar { padding: 2px 6px 1px; }
+  .ctrl-btn { min-height: 28px; padding: 2px 6px; font-size: 0.75rem; }
+  .volume-row { padding: 2px 6px; }
 }
 
 /* ─── Scrollbar ─────────────────────────────────────────────── */
